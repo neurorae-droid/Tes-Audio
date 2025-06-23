@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Editor Audio Visual</title>
+  <script src="https://unpkg.com/wavesurfer.js"></script>
+  <script src="https://unpkg.com/@ffmpeg/ffmpeg@0.12.2/dist/ffmpeg.min.js"></script>
+  <style>
+    body { font-family: sans-serif; padding: 20px; max-width: 800px; margin: auto; }
+    #waveform { border: 1px solid #ccc; margin-bottom: 10px; }
+    button { padding: 10px; margin: 5px 0; width: 100%; }
+    .potongan { background: #eee; margin: 5px 0; padding: 5px; }
+  </style>
+</head>
+<body>
+
+  <h2>Editor Audio Visual (Geser & Potong)</h2>
+  <input type="file" id="audioInput" accept="audio/*">
+  <div id="waveform"></div>
+  <button onclick="tambahPotongan()">Tambah Potongan dari Pilihan</button>
+  <div id="listPotongan"></div>
+  <button onclick="gabungkanAudio()">Gabungkan & Download</button>
+  <p id="status"></p>
+
+  <script>
+    const { createFFmpeg, fetchFile } = FFmpeg;
+    const ffmpeg = createFFmpeg({ log: true });
+    let file, potongan = [];
+
+    const wavesurfer = WaveSurfer.create({
+      container: '#waveform',
+      waveColor: '#a0c4ff',
+      progressColor: '#4361ee',
+      height: 100,
+      responsive: true,
+      plugins: [
+        WaveSurfer.regions.create()
+      ]
+    });
+
+    document.getElementById('audioInput').addEventListener('change', async (e) => {
+      file = e.target.files[0];
+      potongan = [];
+      document.getElementById('listPotongan').innerHTML = '';
+      const url = URL.createObjectURL(file);
+      wavesurfer.load(url);
+    });
+
+    function tambahPotongan() {
+      const region = Object.values(wavesurfer.regions.list)[0];
+      if (!region) return alert("Pilih dulu bagian audio dengan drag.");
+      potongan.push({ start: region.start, end: region.end });
+      document.getElementById('listPotongan').innerHTML +=
+        `<div class="potongan">Start: ${region.start.toFixed(2)}s, End: ${region.end.toFixed(2)}s</div>`;
+      region.remove();
+    }
+
+    async function gabungkanAudio() {
+      if (!ffmpeg.isLoaded()) await ffmpeg.load();
+      document.getElementById('status').textContent = "Memproses...";
+      ffmpeg.FS('writeFile', 'input.mp3', await fetchFile(file));
+
+      const partFiles = [];
+      for (let i = 0; i < potongan.length; i++) {
+        const p = potongan[i];
+        const output = `part${i}.mp3`;
+        await ffmpeg.run(
+          '-i', 'input.mp3',
+          '-ss', `${p.start}`,
+          '-to', `${p.end}`,
+          '-c', 'copy',
+          output
+        );
+        partFiles.push(output);
+      }
+
+      let listContent = partFiles.map(f => `file '${f}'`).join('\n');
+      ffmpeg.FS('writeFile', 'list.txt', listContent);
+      await ffmpeg.run('-f', 'concat', '-safe', '0', '-i', 'list.txt', '-c', 'copy', 'output.mp3');
+
+      const data = ffmpeg.FS('readFile', 'output.mp3');
+      const url = URL.createObjectURL(new Blob([data.buffer], { type: 'audio/mp3' }));
+
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'hasil_audio.mp3';
+      a.click();
+
+      document.getElementById('status').textContent = "Berhasil! File siap diunduh.";
+    }
+  </script>
+
+</body>
+</html>
